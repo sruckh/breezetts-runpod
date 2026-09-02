@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="460" viewBox="0 0 1200 460"
+     role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">BreezeTTS worker request lifecycle</title>
+  <desc id="arch-desc">Request JSON flows through schema_validator.py, then a module-scope Breeze TTS 2 engine that loads once at import time, then storage.py, which delivers audio via a Backblaze B2 presigned URL or an inline base64 fallback, back out as response JSON.</desc>
+
+  <rect width="1200" height="460" rx="24" fill="#0B0D0E"/>
+
+  <text x="48" y="46" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="15" letter-spacing="2" fill="#FF6A3D">REQUEST LIFECYCLE</text>
+
+  <!-- bootstrap callout above Synthesize -->
+  <line x1="598" y1="102" x2="598" y2="170" stroke="#5A3A2C" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <rect x="418" y="66" width="360" height="34" rx="17" fill="none" stroke="#5A3A2C"/>
+  <text x="598" y="88" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="14" fill="#FF6A3D">loads once at import — never per job</text>
+
+  <!-- main pipeline -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <!-- box 1: request -->
+    <rect x="48" y="170" width="188" height="90" rx="12" fill="#111417" stroke="#23262B" stroke-width="1.5"/>
+    <text x="142" y="210" text-anchor="middle" font-size="19" font-weight="700" fill="#F5F3EF">Request</text>
+    <text x="142" y="233" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#8A9098">JSON payload</text>
+
+    <!-- box 2: validate -->
+    <rect x="276" y="170" width="188" height="90" rx="12" fill="#111417" stroke="#23262B" stroke-width="1.5"/>
+    <text x="370" y="210" text-anchor="middle" font-size="19" font-weight="700" fill="#F5F3EF">Validate</text>
+    <text x="370" y="233" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#8A9098">schema_validator.py</text>
+
+    <!-- box 3: synthesize -->
+    <rect x="504" y="170" width="188" height="90" rx="12" fill="#151210" stroke="#5A3A2C" stroke-width="1.5"/>
+    <text x="598" y="210" text-anchor="middle" font-size="19" font-weight="700" fill="#F5F3EF">Synthesize</text>
+    <text x="598" y="233" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#FF6A3D">engine.py (warm)</text>
+
+    <!-- box 4: deliver -->
+    <rect x="732" y="170" width="188" height="90" rx="12" fill="#111417" stroke="#23262B" stroke-width="1.5"/>
+    <text x="826" y="210" text-anchor="middle" font-size="19" font-weight="700" fill="#F5F3EF">Deliver</text>
+    <text x="826" y="233" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#8A9098">storage.py</text>
+
+    <!-- box 5: response -->
+    <rect x="960" y="170" width="188" height="90" rx="12" fill="#111417" stroke="#23262B" stroke-width="1.5"/>
+    <text x="1054" y="210" text-anchor="middle" font-size="19" font-weight="700" fill="#F5F3EF">Response</text>
+    <text x="1054" y="233" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#8A9098">JSON + audio</text>
+  </g>
+
+  <!-- arrows between main boxes -->
+  <g stroke="#4A5158" stroke-width="1.5" fill="none">
+    <line x1="236" y1="215" x2="270" y2="215"/>
+    <line x1="464" y1="215" x2="498" y2="215"/>
+    <line x1="692" y1="215" x2="726" y2="215"/>
+    <line x1="920" y1="215" x2="954" y2="215"/>
+  </g>
+  <g fill="#4A5158">
+    <path d="M270 215 L262 210 L262 220 Z"/>
+    <path d="M498 215 L490 210 L490 220 Z"/>
+    <path d="M726 215 L718 210 L718 220 Z"/>
+    <path d="M954 215 L946 210 L946 220 Z"/>
+  </g>
+
+  <!-- delivery fork -->
+  <line x1="826" y1="260" x2="731" y2="300" stroke="#4A5158" stroke-width="1.5"/>
+  <line x1="826" y1="260" x2="921" y2="300" stroke="#4A5158" stroke-width="1.5"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="646" y="300" width="170" height="66" rx="10" fill="#111417" stroke="#23262B" stroke-width="1.5"/>
+    <text x="731" y="328" text-anchor="middle" font-size="15" font-weight="700" fill="#F5F3EF">S3 · Backblaze B2</text>
+    <text x="731" y="348" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8A9098">presigned URL, 24h</text>
+
+    <rect x="836" y="300" width="170" height="66" rx="10" fill="#111417" stroke="#23262B" stroke-width="1.5"/>
+    <text x="921" y="328" text-anchor="middle" font-size="15" font-weight="700" fill="#F5F3EF">Base64</text>
+    <text x="921" y="348" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#8A9098">inline fallback</text>
+  </g>
+
+  <text x="826" y="404" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="14" fill="#5E6469">AUDIO_DELIVERY = auto | s3 | base64 — auto prefers S3 when credentials exist, else base64</text>
+</svg>

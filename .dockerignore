@@ -1,0 +1,69 @@
+# Git & VCS
+.git/
+.gitignore
+
+# AI Agents & Scaffolding
+.claude/
+.goals/
+.outline/
+.icm/
+.codegraph/
+AGENTS.md
+CLAUDE.md
+
+# Documentation & README assets (not needed to run the worker)
+README.md
+assets/
+
+# Tests (not needed to run the worker; exercised in CI/dev, not the image)
+tests/
+
+# Build files not needed inside the image itself
+.dockerignore
+Dockerfile
+
+# Python cache & build
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs & temp artifacts
+*.log
+*.pcm
+*.wav
+*.tmp
+tmp/
+output/
