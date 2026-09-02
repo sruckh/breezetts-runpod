@@ -17,8 +17,9 @@ def test_dockerfile_init_timeout_env():
     assert "RUNPOD_INIT_TIMEOUT=1200" in DOCKERFILE
 
 
-def test_dockerfile_break_system_packages_env():
-    assert "PIP_BREAK_SYSTEM_PACKAGES=1" in DOCKERFILE
+def test_dockerfile_venv_configured():
+    assert 'PATH="/opt/venv/bin:$PATH"' in DOCKERFILE
+    assert "python3 -m venv /opt/venv" in DOCKERFILE
 
 
 def test_dockerfile_runpod_log_level_env():
