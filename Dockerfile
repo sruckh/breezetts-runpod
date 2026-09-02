@@ -1,5 +1,5 @@
 # Spec: .icm/stages/05-container-and-dockerfile/output/container-and-dockerfile.md
-FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -13,6 +13,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-dev \
         ca-certificates \
         curl \
         ffmpeg \
@@ -25,11 +28,11 @@ WORKDIR /app
 
 COPY requirements.txt ./
 
-RUN python -m pip install --upgrade pip setuptools wheel
+RUN python3 -m pip install --upgrade pip setuptools wheel
 
-RUN python -m pip install -r requirements.txt
+RUN python3 -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 -r requirements.txt
 
-RUN python -m pip install --no-deps \
+RUN python3 -m pip install --no-deps \
     "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
 
 COPY . .
