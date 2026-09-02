@@ -27,10 +27,8 @@ COPY requirements.txt ./
 
 RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install -r requirements.txt \
-    && python -m pip install --no-deps \
-        "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" \
-    && python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA compiled {torch.version.cuda}'); import flash_attn; print(f'Flash Attention {flash_attn.__version__}')" \
-    && ffmpeg -version | head -n 1
+    && python -m pip install --no-build-isolation "flash-attn==2.8.3" \
+        --find-links https://github.com/Dao-AILab/flash-attention/releases/expanded_assets/v2.8.3
 
 COPY . .
 
