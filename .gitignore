@@ -39,6 +39,9 @@ htmlcov/
 .claude/
 .codegraph/
 .outline/
+.goals/
+.icm/
+.serena/
 
 # Logs & temp artifacts
 *.log
