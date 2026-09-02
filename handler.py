@@ -4,6 +4,9 @@ Spec: .icm/stages/04-handler-and-storage/output/handler-and-storage.md
 """
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import traceback
 
@@ -15,6 +18,66 @@ from schema_validator import ValidationError, validate
 
 SAMPLE_RATE = 24000
 BYTES_PER_SAMPLE = 2  # 16-bit mono PCM
+
+
+def _log_system_info() -> None:
+    """Print system diagnostics on worker startup (CUDA, PyTorch, FFmpeg, Flash-Attn)."""
+    print("=== BreezeTTS Worker System Diagnostics ===", flush=True)
+    print(f"Python: {sys.version.split()[0]} ({sys.executable})", flush=True)
+
+    try:
+        import torch
+
+        print(f"PyTorch: {torch.__version__} (compiled CUDA: {torch.version.cuda})", flush=True)
+        cuda_avail = torch.cuda.is_available()
+        print(f"CUDA Available: {cuda_avail}", flush=True)
+        if cuda_avail:
+            device_count = torch.cuda.device_count()
+            device_name = torch.cuda.get_device_name(0)
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            print(f"GPU: {device_name} (Count: {device_count}, Total VRAM: {vram_gb:.2f} GB)", flush=True)
+    except ImportError:
+        print("PyTorch: not installed (mock test environment)", flush=True)
+    except Exception as exc:
+        print(f"PyTorch/CUDA check error: {exc}", flush=True)
+
+    try:
+        import flash_attn
+
+        v = getattr(flash_attn, "__version__", "available")
+        print(f"Flash Attention: {v}", flush=True)
+    except ImportError:
+        print("Flash Attention: not installed / CPU mock mode", flush=True)
+    except Exception as exc:
+        print(f"Flash Attention check error: {exc}", flush=True)
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        try:
+            res = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
+            first_line = res.stdout.splitlines()[0] if res.stdout else "available"
+            print(f"FFmpeg: {first_line}", flush=True)
+        except Exception as exc:
+            print(f"FFmpeg: {ffmpeg_bin} (version check error: {exc})", flush=True)
+    else:
+        print("FFmpeg: not found in PATH", flush=True)
+
+    try:
+        import runpod
+
+        v = getattr(runpod, "__version__", "available")
+        print(f"RunPod SDK: {v}", flush=True)
+    except ImportError:
+        pass
+
+    delivery_mode = os.environ.get("AUDIO_DELIVERY", "base64")
+    b2_bucket = os.environ.get("B2_BUCKET", "not configured")
+    hf_home = os.environ.get("HF_HOME", "/runpod-volume/hf-cache")
+    hf_transfer = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER", "0")
+    print(f"Default Delivery: {delivery_mode} (B2 Bucket: {b2_bucket})", flush=True)
+    print(f"HF_HOME: {hf_home} (HF_HUB_ENABLE_HF_TRANSFER: {hf_transfer})", flush=True)
+    print(f"RUNPOD_LOG_LEVEL: {os.environ.get('RUNPOD_LOG_LEVEL', 'INFO')}", flush=True)
+    print("===========================================", flush=True)
 
 
 def _crash_dump(context: dict) -> None:
@@ -84,4 +147,10 @@ def handler(job):
 
 
 if __name__ == "__main__":
-    runpod.serverless.start({"handler": handler})
+    _log_system_info()
+    runpod.serverless.start(
+        {
+            "handler": handler,
+            "rp_log_level": os.environ.get("RUNPOD_LOG_LEVEL", "INFO"),
+        }
+    )

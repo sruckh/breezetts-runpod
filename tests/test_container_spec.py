@@ -17,10 +17,14 @@ def test_dockerfile_init_timeout_env():
     assert "RUNPOD_INIT_TIMEOUT=1200" in DOCKERFILE
 
 
-def test_dockerfile_flash_attn_pinned():
-    assert "flash-attn==2.8.3" in DOCKERFILE
+def test_dockerfile_break_system_packages_env():
+    assert "PIP_BREAK_SYSTEM_PACKAGES=1" in DOCKERFILE
 
 
-def test_dockerfile_flash_attn_arch_arg():
-    assert "ARG FLASH_ATTN_CUDA_ARCHS=90" in DOCKERFILE
-    assert "FLASH_ATTN_CUDA_ARCHS" in DOCKERFILE
+def test_dockerfile_runpod_log_level_env():
+    assert "RUNPOD_LOG_LEVEL=INFO" in DOCKERFILE
+
+
+def test_dockerfile_flash_attn_wheel_installed():
+    assert "flash_attn-2.8.3" in DOCKERFILE
+    assert "https://github.com/Dao-AILab/flash-attention/releases/download" in DOCKERFILE

@@ -81,3 +81,41 @@ def test_bootstrap_crash_dumps_before_exit(monkeypatch, capsys):
     assert "fast_all:" in captured
     assert "Traceback" in captured
     assert "model load exploded" in captured
+
+
+def test_resolve_checkpoint_finds_runpod_cached_snapshot(tmp_path, monkeypatch):
+    runpod_cache_hub = tmp_path / "huggingface-cache" / "hub"
+    model_dir = runpod_cache_hub / "models--BreezeBlue--Breeze-TTS-2"
+    snapshot_dir = model_dir / "snapshots" / "abc123456789"
+    (snapshot_dir / "audio_tokenizer").mkdir(parents=True)
+    (snapshot_dir / "config.json").write_text("{}")
+    (model_dir / "refs").mkdir(parents=True)
+    (model_dir / "refs" / "main").write_text("abc123456789")
+
+    monkeypatch.setattr(engine, "VOLUME_ROOT", tmp_path)
+    monkeypatch.setattr(engine, "CHECKPOINT_DIR", tmp_path / "breeze-tts-2")
+
+    resolved = engine.resolve_checkpoint()
+    assert resolved == snapshot_dir
+
+
+def test_resolve_checkpoint_finds_available_snapshot_without_refs(tmp_path, monkeypatch):
+    runpod_cache_hub = tmp_path / "huggingface-cache" / "hub"
+    model_dir = runpod_cache_hub / "models--BreezeBlue--Breeze-TTS-2"
+    snapshot_dir = model_dir / "snapshots" / "snap999"
+    (snapshot_dir / "audio_tokenizer").mkdir(parents=True)
+
+    monkeypatch.setattr(engine, "VOLUME_ROOT", tmp_path)
+    monkeypatch.setattr(engine, "CHECKPOINT_DIR", tmp_path / "breeze-tts-2")
+
+    resolved = engine.resolve_checkpoint()
+    assert resolved == snapshot_dir
+
+
+def test_resolve_checkpoint_uses_env_override(tmp_path, monkeypatch):
+    custom_dir = tmp_path / "custom-breeze"
+    (custom_dir / "audio_tokenizer").mkdir(parents=True)
+
+    monkeypatch.setenv("BREEZE_CHECKPOINT_DIR", str(custom_dir))
+    resolved = engine.resolve_checkpoint()
+    assert resolved == custom_dir

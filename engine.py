@@ -29,15 +29,106 @@ class EngineBootstrapError(RuntimeError):
 
 
 def _checkpoint_is_complete(ckpt_dir: Path) -> bool:
-    return ckpt_dir.is_dir() and (ckpt_dir / "audio_tokenizer").is_dir()
+    return ckpt_dir.is_dir() and (
+        (ckpt_dir / "audio_tokenizer").is_dir() or (ckpt_dir / "config.json").is_file()
+    )
+
+
+def _find_cached_snapshot(hub_dir: Path, repo_id: str) -> Path | None:
+    """Check a Hugging Face hub cache directory for a cached model snapshot (RunPod model caching)."""
+    if not hub_dir.is_dir():
+        return None
+
+    if "/" in repo_id:
+        org, name = repo_id.split("/", 1)
+        model_dir_name = f"models--{org}--{name}"
+    else:
+        model_dir_name = f"models--{repo_id}"
+
+    model_root = hub_dir / model_dir_name
+    if not model_root.is_dir():
+        return None
+
+    snapshots_dir = model_root / "snapshots"
+    if not snapshots_dir.is_dir():
+        return None
+
+    # 1. Check snapshot hash in refs/main
+    refs_main = model_root / "refs" / "main"
+    if refs_main.is_file():
+        try:
+            snapshot_hash = refs_main.read_text().strip()
+            candidate = snapshots_dir / snapshot_hash
+            if _checkpoint_is_complete(candidate):
+                print(f"[ModelCache] Using cached snapshot from refs/main: {candidate}", flush=True)
+                return candidate
+        except Exception:
+            pass
+
+    # 2. Check any available snapshot directory
+    try:
+        snapshots = [p for p in snapshots_dir.iterdir() if p.is_dir() and _checkpoint_is_complete(p)]
+        if snapshots:
+            snapshots.sort(reverse=True)
+            candidate = snapshots[0]
+            print(f"[ModelCache] Using cached snapshot: {candidate}", flush=True)
+            return candidate
+    except Exception:
+        pass
+
+    return None
 
 
 def resolve_checkpoint() -> Path:
-    """/runpod-volume/breeze-tts-2 cache -> hf_transfer download -> plain
-    huggingface_hub fallback."""
+    """Resolve model checkpoint location in priority order:
+    1. BREEZE_CHECKPOINT_DIR or MODEL_PATH environment override
+    2. RunPod Serverless Model Cache (/runpod-volume/huggingface-cache/hub)
+    3. Custom HF_HOME hub cache (/runpod-volume/hf-cache/hub)
+    4. Dedicated volume path (/runpod-volume/breeze-tts-2)
+    5. User home Hugging Face cache (~/.cache/huggingface/hub)
+    6. Download via hf_transfer / huggingface_hub snapshot_download
+    """
+    # 1. Explicit environment override
+    env_override = os.environ.get("BREEZE_CHECKPOINT_DIR") or os.environ.get("MODEL_PATH")
+    if env_override:
+        override_path = Path(env_override)
+        if _checkpoint_is_complete(override_path):
+            print(f"[ModelCache] Using environment override path: {override_path}", flush=True)
+            return override_path
+
+    # 2. RunPod Official Serverless Model Cache location
+    runpod_cache_hub = VOLUME_ROOT / "huggingface-cache" / "hub"
+    cached = _find_cached_snapshot(runpod_cache_hub, CHECKPOINT_REPO_ID)
+    if cached is not None:
+        return cached
+
+    # Also check /runpod-volume/huggingface-cache/hub if VOLUME_ROOT is customized
+    std_runpod_cache = Path("/runpod-volume/huggingface-cache/hub")
+    if std_runpod_cache != runpod_cache_hub:
+        cached = _find_cached_snapshot(std_runpod_cache, CHECKPOINT_REPO_ID)
+        if cached is not None:
+            return cached
+
+    # 3. Custom HF_HOME cache
+    hf_home = Path(os.environ.get("HF_HOME", "/runpod-volume/hf-cache"))
+    hf_home_hub = hf_home / "hub"
+    cached = _find_cached_snapshot(hf_home_hub, CHECKPOINT_REPO_ID)
+    if cached is not None:
+        return cached
+
+    # 4. Dedicated volume directory (/runpod-volume/breeze-tts-2)
     if _checkpoint_is_complete(CHECKPOINT_DIR):
+        print(f"[ModelCache] Using dedicated volume path: {CHECKPOINT_DIR}", flush=True)
         return CHECKPOINT_DIR
 
+    # 5. User home cache (~/.cache/huggingface/hub)
+    user_cache_hub = Path.home() / ".cache" / "huggingface" / "hub"
+    cached = _find_cached_snapshot(user_cache_hub, CHECKPOINT_REPO_ID)
+    if cached is not None:
+        return cached
+
+    # 6. Fallback to downloading
+    print(f"[ModelCache] No cached snapshot found, downloading {CHECKPOINT_REPO_ID} to {CHECKPOINT_DIR}...", flush=True)
     from huggingface_hub import snapshot_download
 
     try:
