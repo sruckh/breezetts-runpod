@@ -26,5 +26,5 @@ def test_dockerfile_runpod_log_level_env():
 
 
 def test_dockerfile_flash_attn_wheel_installed():
-    assert "flash-attn==2.8.3" in DOCKERFILE
-    assert "https://github.com/Dao-AILab/flash-attention/releases/expanded_assets" in DOCKERFILE
+    assert "flash_attn-2.8.3" in DOCKERFILE
+    assert "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3" in DOCKERFILE
