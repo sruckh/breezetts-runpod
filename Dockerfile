@@ -25,10 +25,12 @@ WORKDIR /app
 
 COPY requirements.txt ./
 
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install -r requirements.txt \
-    && python -m pip install --no-deps \
-        "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
+RUN python -m pip install --upgrade pip setuptools wheel
+
+RUN python -m pip install -r requirements.txt
+
+RUN python -m pip install --no-deps \
+    "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
 
 COPY . .
 
