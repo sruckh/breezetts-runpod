@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-FF6A3D?labelColor=0B0D0E" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/platform-runpod%20serverless-FF6A3D?labelColor=0B0D0E" alt="RunPod Serverless">
   <img src="https://img.shields.io/badge/audio-24kHz%20·%2016--bit%20·%20mono-FF6A3D?labelColor=0B0D0E" alt="24kHz 16-bit mono PCM WAV">
-  <img src="https://img.shields.io/badge/tests-49%20passing-FF6A3D?labelColor=0B0D0E" alt="49 tests passing">
+  <img src="https://img.shields.io/badge/tests-56%20passing-FF6A3D?labelColor=0B0D0E" alt="56 tests passing">
 </p>
 
 A [RunPod serverless](https://docs.runpod.io/serverless/overview) worker that wraps
@@ -36,14 +36,23 @@ The model loads once, at process start; every request after that hits an already
 
 ## Three ways to give it a voice
 
-| Mode | Reference audio | Instruction | What it does |
-|---|:---:|:---:|---|
-| **Voice Clone** | required + exact transcript | — | Zero-shot clone of the reference speaker |
-| **Voice Design** | — | required | Builds a voice from a natural-language description (`cfg_scale=4` baseline) |
-| **Voice Direction** | required + exact transcript | required | Clones the reference speaker, then steers tone, emotion, and pace |
+| Mode | `mode` | `reference_audio` | `reference_text` | `instruct` | Description |
+|---|:---:|:---:|:---:|:---:|---|
+| **Voice Clone** | `"clone"` (or omitted) | **Required** (base64 WAV) | **Required** (exact transcript) | Forbidden | Zero-shot clone of the reference speaker |
+| **Voice Design** | `"design"` (or omitted) | Forbidden | — | **Required** | Builds a voice from a natural-language description |
+| **Voice Direction** | `"direction"` (or omitted) | **Required** (base64 WAV) | **Required** (exact transcript) | **Required** | Clones reference speaker, then steers tone/emotion/pace |
 
-Mode is inferred from the payload shape if you don't set `mode` explicitly: reference audio alone
-is `clone`, reference audio plus an instruction is `direction`, neither is `design`.
+### Mode Inference & Field Requirements
+
+Mode is inferred automatically from the payload fields if you omit the `mode` parameter:
+- `reference_audio` + `reference_text` (without `instruct`) &rarr; **`clone`**
+- `instruct` alone (without `reference_audio`) &rarr; **`design`**
+- `reference_audio` + `reference_text` + `instruct` &rarr; **`direction`**
+
+> **Important for Voice Cloning:**
+> 1. `reference_audio`: A base64-encoded audio clip (WAV recommended, mono or stereo, 16-bit or 24-bit PCM; 3–10 seconds is optimal). Maximum 4 MB per clip, 6 MB total decoded.
+> 2. `reference_text`: Exact transcript of what the speaker says in `reference_audio`. The model uses this audio-text pair as prompt tokens for speech conditioning.
+> 3. `instruct`: Omit `instruct` for pure voice cloning (`clone` mode). If you provide both `reference_audio` and `instruct`, the worker operates in `direction` mode (steered clone).
 
 Inline vocal events pass straight through to the model, untouched, in either language:
 
@@ -53,6 +62,60 @@ ZH:  [笑]     [咳嗽]    [清嗓子]          [叹气]
 ```
 
 ## Quickstart
+
+### 1. Run with cURL (RunPod Serverless Endpoint)
+
+#### Voice Clone (Zero-Shot Clone from Reference Audio)
+Encode your reference audio file (e.g., a 5-second WAV recording) to base64, provide its exact transcript in `reference_text`, and specify your target `text`:
+
+```bash
+# Prepare base64 reference audio
+REF_B64=$(base64 -w 0 reference.wav)
+
+# Send voice clone request to RunPod
+curl -s -X POST "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/runsync" \
+  -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": {
+      "text": "Hello world! This audio was generated using zero-shot voice cloning.",
+      "reference_audio": "'"${REF_B64}"'",
+      "reference_text": "This is the exact spoken text in the reference audio clip."
+    }
+  }' | jq -r '.output.audio_base64' | base64 -d > cloned_output.wav
+```
+
+#### Voice Design (Natural Language Voice Prompt)
+```bash
+curl -s -X POST "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/runsync" \
+  -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": {
+      "text": "Hello world! BreezeTTS is now working on RunPod Serverless with GPU acceleration.",
+      "instruct": "A calm, natural, and expressive voice."
+    }
+  }' | jq -r '.output.audio_base64' | base64 -d > designed_output.wav
+```
+
+#### Voice Direction (Cloned Voice with Tone/Emotion Steering)
+```bash
+REF_B64=$(base64 -w 0 reference.wav)
+
+curl -s -X POST "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/runsync" \
+  -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": {
+      "text": "(sigh) I cannot believe we finally made it here today.",
+      "reference_audio": "'"${REF_B64}"'",
+      "reference_text": "This is the exact spoken text in the reference audio clip.",
+      "instruct": "Whispering softly, sounding tired but relieved."
+    }
+  }' | jq -r '.output.audio_base64' | base64 -d > directed_output.wav
+```
+
+### 2. Run Locally with RunPod Test Harness
 
 ```bash
 git clone <this-repo>
@@ -131,12 +194,13 @@ response_checksum_validation="when_required")` — without it, B2 rejects upload
 BREEZE_TEST_MOCK_ENGINE=1 python3 -m pytest tests/ -q
 ```
 
-49 tests, all CPU-only and network-free: the model never loads (`BREEZE_TEST_MOCK_ENGINE=1` swaps
+56 tests, all CPU-only and network-free: the model never loads (`BREEZE_TEST_MOCK_ENGINE=1` swaps
 in a silent-WAV stub at the same call boundary), and every S3 call is a stubbed or monkeypatched
 `boto3` client. Coverage includes golden payloads for all three modes, all 8 vocal cues, the
-4 MB / 6 MB boundary (accepted at the bound, rejected one byte over), the B2 checksum config and
-key template, the base64 fallback path, `--test_input` per mode, and every crash-dump path
-checked for leaked secrets or reference audio.
+4 MB / 6 MB boundary (accepted at the bound, rejected one byte over), reference audio temp-file
+creation and safe cleanup in the engine, the B2 checksum config and key template, the base64
+fallback path, `--test_input` per mode, and every crash-dump path checked for leaked secrets or
+reference audio.
 
 ## Container
 
@@ -161,7 +225,7 @@ engine.py              module-scope model bootstrap + synthesis dispatch
 storage.py              B2 upload/presign, base64 fallback, Secret wrapping
 handler.py              runpod.serverless.start(...) + crash dumps
 Dockerfile              CUDA build, package pins, launch contract
-tests/                  49 tests — see Testing above
+tests/                  56 tests — see Testing above
 .icm/                   the full spec this worker was built from, stage by stage
 ```
 

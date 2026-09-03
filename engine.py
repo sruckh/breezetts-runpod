@@ -10,9 +10,11 @@ from __future__ import annotations
 import io
 import os
 import sys
+import tempfile
 import traceback
 import wave
 from pathlib import Path
+from typing import Any
 
 SAMPLE_RATE = 24000
 VOLUME_ROOT = Path(os.environ.get("RUNPOD_VOLUME_PATH", "/runpod-volume"))
@@ -217,6 +219,27 @@ _bootstrap()
 _TEMPLATE_BY_HAS_REFERENCE = {True: "ref_edit_tata", False: "tts_instruction"}
 
 
+def _build_job(request) -> tuple[dict[str, Any], Path | None]:
+    has_reference = bool(request.reference_audio_bytes)
+    job = {
+        "id": "job",
+        "text": request.text,
+        "instruction": request.instruct or "Speak clearly and naturally.",
+        "speaker": "S0",
+    }
+    ref_audio_path: Path | None = None
+    if has_reference:
+        with tempfile.NamedTemporaryFile(
+            prefix="breeze_ref_", suffix=".wav", delete=False
+        ) as tmp_file:
+            tmp_file.write(request.reference_audio_bytes[0])
+            ref_audio_path = Path(tmp_file.name)
+        job["ref_audio_path"] = str(ref_audio_path)
+        job["ref_audio_bytes"] = request.reference_audio_bytes[0]
+        job["ref_text"] = request.reference_text
+    return job, ref_audio_path
+
+
 def synthesize(request) -> bytes:
     """request: schema_validator.NormalizedRequest -> WAV bytes, 24 kHz mono
     16-bit PCM. Reads the module-level warm runtime only; never re-bootstraps."""
@@ -228,34 +251,30 @@ def synthesize(request) -> bytes:
     has_reference = bool(request.reference_audio_bytes)
     template_name = _TEMPLATE_BY_HAS_REFERENCE[has_reference]
 
-    job = {
-        "id": "job",
-        "text": request.text,
-        "instruction": request.instruct or "Speak clearly and naturally.",
-        "speaker": "S0",
-    }
-    if has_reference:
-        job["ref_audio_bytes"] = request.reference_audio_bytes[0]
-        job["ref_text"] = request.reference_text
+    ref_audio_path: Path | None = None
+    try:
+        job, ref_audio_path = _build_job(request)
+        inputs = prepare_inputs(
+            _TOKENIZER,
+            _AUDIO_TOKENIZER,
+            _MODEL,
+            [job],
+            get_template(template_name),
+            guidance_scale=request.cfg_scale,
+            guidance_scale_ref=None,
+            guidance_scale_ins=None,
+        )
 
-    inputs = prepare_inputs(
-        _TOKENIZER,
-        _AUDIO_TOKENIZER,
-        _MODEL,
-        [job],
-        get_template(template_name),
-        guidance_scale=request.cfg_scale,
-        guidance_scale_ref=None,
-        guidance_scale_ins=None,
-    )
+        import soundfile as sf
 
-    import soundfile as sf
-
-    buf = io.BytesIO()
-    with sf.SoundFile(
-        buf, mode="w", samplerate=_RUNTIME.sample_rate, channels=1,
-        subtype="PCM_16", format="WAV",
-    ) as out:
-        for chunk in _RUNTIME.iter_audio_chunks(inputs, request_id="job"):
-            out.write(chunk.audio)
-    return buf.getvalue()
+        buf = io.BytesIO()
+        with sf.SoundFile(
+            buf, mode="w", samplerate=_RUNTIME.sample_rate, channels=1,
+            subtype="PCM_16", format="WAV",
+        ) as out:
+            for chunk in _RUNTIME.iter_audio_chunks(inputs, request_id="job"):
+                out.write(chunk.audio)
+        return buf.getvalue()
+    finally:
+        if ref_audio_path is not None:
+            ref_audio_path.unlink(missing_ok=True)

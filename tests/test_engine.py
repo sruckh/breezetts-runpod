@@ -119,3 +119,84 @@ def test_resolve_checkpoint_uses_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("BREEZE_CHECKPOINT_DIR", str(custom_dir))
     resolved = engine.resolve_checkpoint()
     assert resolved == custom_dir
+
+
+def test_build_job_with_reference_audio_creates_temp_file():
+    raw_audio = b"RIFFfakeaudiobytes12345"
+    import base64
+
+    b64_audio = base64.b64encode(raw_audio).decode("ascii")
+    req = validate({
+        "text": "Target synthesis text",
+        "reference_audio": b64_audio,
+        "reference_text": "Reference transcript",
+    })
+
+    job, ref_path = engine._build_job(req)
+    try:
+        assert ref_path is not None
+        assert ref_path.is_file()
+        assert ref_path.read_bytes() == raw_audio
+        assert job["ref_audio_path"] == str(ref_path)
+        assert job["ref_text"] == "Reference transcript"
+        assert job["ref_audio_bytes"] == raw_audio
+        assert job["text"] == "Target synthesis text"
+        assert job["instruction"] == "Speak clearly and naturally."
+    finally:
+        if ref_path is not None:
+            ref_path.unlink(missing_ok=True)
+            assert not ref_path.exists()
+
+
+def test_build_job_without_reference_audio():
+    req = validate({
+        "text": "Target synthesis text",
+        "instruct": "Calm and natural",
+    })
+
+    job, ref_path = engine._build_job(req)
+    assert ref_path is None
+    assert "ref_audio_path" not in job
+    assert "ref_text" not in job
+    assert "ref_audio_bytes" not in job
+    assert job["text"] == "Target synthesis text"
+    assert job["instruction"] == "Calm and natural"
+
+
+def test_synthesize_cleans_up_temp_file_on_error(monkeypatch):
+    raw_audio = b"RIFFfakeaudiobytes999"
+    import base64
+
+    b64_audio = base64.b64encode(raw_audio).decode("ascii")
+    req = validate({
+        "text": "Target synthesis text",
+        "reference_audio": b64_audio,
+        "reference_text": "Reference transcript",
+    })
+
+    captured_path = []
+
+    def fake_prepare_inputs(*args, **kwargs):
+        # Verify temp file exists at time prepare_inputs is called
+        jobs = args[3] if len(args) > 3 else kwargs.get("requests", [])
+        path = Path(jobs[0]["ref_audio_path"])
+        assert path.is_file()
+        captured_path.append(path)
+        raise RuntimeError("Inference exploded intentionally")
+
+    import types
+    fake_templates = types.ModuleType("breeze_infer.templates")
+    fake_templates.get_template = lambda name: None
+    fake_templates.prepare_inputs = fake_prepare_inputs
+
+    monkeypatch.setitem(sys.modules, "breeze_infer", types.ModuleType("breeze_infer"))
+    monkeypatch.setitem(sys.modules, "breeze_infer.templates", fake_templates)
+    monkeypatch.setattr(engine, "_MOCK_MODE", False)
+
+    with pytest.raises(RuntimeError, match="Inference exploded intentionally"):
+        engine.synthesize(req)
+
+    assert len(captured_path) == 1
+    # Verify temp file was unlinked in finally block
+    assert not captured_path[0].exists()
+
