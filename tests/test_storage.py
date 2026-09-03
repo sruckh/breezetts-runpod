@@ -45,6 +45,7 @@ def test_deliver_s3_uses_when_required_checksum_config(monkeypatch):
     storage.deliver(WAV_BYTES, "job-1", "s3")
 
     cfg = captured["config"]
+    assert cfg.signature_version == "s3v4"
     assert cfg.request_checksum_calculation == "when_required"
     assert cfg.response_checksum_validation == "when_required"
 

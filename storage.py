@@ -83,12 +83,20 @@ def _build_client():
     access_key_id = _env_secret("B2_ACCESS_KEY_ID")
     secret_access_key = _env_secret("B2_SECRET_ACCESS_KEY")
     endpoint_url = os.environ.get("B2_ENDPOINT_URL")  # not a credential
+    region_name = os.environ.get("B2_REGION")
+    if not region_name and endpoint_url:
+        match = re.search(r"s3\.([a-z0-9-]+)\.backblazeb2\.com", endpoint_url)
+        if match:
+            region_name = match.group(1)
+
     return boto3.client(
         "s3",
         endpoint_url=endpoint_url,
         aws_access_key_id=access_key_id.reveal(),
         aws_secret_access_key=secret_access_key.reveal(),
+        region_name=region_name,
         config=botocore.config.Config(
+            signature_version="s3v4",
             request_checksum_calculation="when_required",
             response_checksum_validation="when_required",
         ),
