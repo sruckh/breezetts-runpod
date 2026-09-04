@@ -109,37 +109,25 @@ def handler(job):
     except ValidationError as exc:
         return exc.to_dict()
 
+    crash_context = {
+        "job_id": job_id,
+        "mode": normalized_request.mode,
+        "reference_audio_present": bool(job_input.get("reference_audio")),
+    }
+
     try:
         wav_bytes = engine.synthesize(normalized_request)
     except Exception:
-        _crash_dump(
-            {
-                "job_id": job_id,
-                "mode": normalized_request.mode,
-                "reference_audio_present": bool(job_input.get("reference_audio")),
-            }
-        )
+        _crash_dump(crash_context)
         return {"error": {"code": "synthesis_failed", "message": "synthesis failed"}}
 
     try:
         delivery = storage.deliver(wav_bytes, job_id, normalized_request.response_delivery)
     except storage.DeliveryError as exc:
-        _crash_dump(
-            {
-                "job_id": job_id,
-                "mode": normalized_request.mode,
-                "reference_audio_present": bool(job_input.get("reference_audio")),
-            }
-        )
+        _crash_dump(crash_context)
         return exc.to_dict()
     except Exception:
-        _crash_dump(
-            {
-                "job_id": job_id,
-                "mode": normalized_request.mode,
-                "reference_audio_present": bool(job_input.get("reference_audio")),
-            }
-        )
+        _crash_dump(crash_context)
         return {"error": {"code": "delivery_failed", "message": "delivery failed"}}
 
     metadata = _synthesis_metadata(normalized_request, delivery["size_bytes"])

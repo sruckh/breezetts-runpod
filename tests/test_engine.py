@@ -89,6 +89,7 @@ def test_resolve_checkpoint_finds_runpod_cached_snapshot(tmp_path, monkeypatch):
     snapshot_dir = model_dir / "snapshots" / "abc123456789"
     (snapshot_dir / "audio_tokenizer").mkdir(parents=True)
     (snapshot_dir / "config.json").write_text("{}")
+    (snapshot_dir / "model.safetensors").write_text("x")
     (model_dir / "refs").mkdir(parents=True)
     (model_dir / "refs" / "main").write_text("abc123456789")
 
@@ -104,6 +105,7 @@ def test_resolve_checkpoint_finds_available_snapshot_without_refs(tmp_path, monk
     model_dir = runpod_cache_hub / "models--BreezeBlue--Breeze-TTS-2"
     snapshot_dir = model_dir / "snapshots" / "snap999"
     (snapshot_dir / "audio_tokenizer").mkdir(parents=True)
+    (snapshot_dir / "audio_tokenizer" / "model.safetensors").write_text("x")
 
     monkeypatch.setattr(engine, "VOLUME_ROOT", tmp_path)
     monkeypatch.setattr(engine, "CHECKPOINT_DIR", tmp_path / "breeze-tts-2")
@@ -115,10 +117,23 @@ def test_resolve_checkpoint_finds_available_snapshot_without_refs(tmp_path, monk
 def test_resolve_checkpoint_uses_env_override(tmp_path, monkeypatch):
     custom_dir = tmp_path / "custom-breeze"
     (custom_dir / "audio_tokenizer").mkdir(parents=True)
+    (custom_dir / "audio_tokenizer" / "model.safetensors").write_text("x")
 
     monkeypatch.setenv("BREEZE_CHECKPOINT_DIR", str(custom_dir))
     resolved = engine.resolve_checkpoint()
     assert resolved == custom_dir
+
+
+def test_checkpoint_completeness_requires_weights(tmp_path):
+    """config.json downloads first, so a partial (killed) download leaves a
+    manifest-only dir behind. It must not count as a usable checkpoint."""
+    poison = tmp_path / "ckpt"
+    poison.mkdir()
+    (poison / "config.json").write_text("{}")
+    assert not engine._checkpoint_is_complete(poison)
+
+    (poison / "model.safetensors").write_text("x")
+    assert engine._checkpoint_is_complete(poison)
 
 
 def test_build_job_with_reference_audio_creates_temp_file():
@@ -139,7 +154,7 @@ def test_build_job_with_reference_audio_creates_temp_file():
         assert ref_path.read_bytes() == raw_audio
         assert job["ref_audio_path"] == str(ref_path)
         assert job["ref_text"] == "Reference transcript"
-        assert job["ref_audio_bytes"] == raw_audio
+        assert "ref_audio_bytes" not in job
         assert job["text"] == "Target synthesis text"
         assert job["instruction"] == "Speak clearly and naturally."
     finally:

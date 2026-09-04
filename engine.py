@@ -31,8 +31,16 @@ class EngineBootstrapError(RuntimeError):
 
 
 def _checkpoint_is_complete(ckpt_dir: Path) -> bool:
-    return ckpt_dir.is_dir() and (
-        (ckpt_dir / "audio_tokenizer").is_dir() or (ckpt_dir / "config.json").is_file()
+    """config.json alone proves nothing: it downloads first, so a partial
+    (init-timeout-killed) download leaves it behind. Require weights too."""
+    if not ckpt_dir.is_dir():
+        return False
+    has_manifest = (ckpt_dir / "config.json").is_file() or (
+        ckpt_dir / "audio_tokenizer"
+    ).is_dir()
+    return has_manifest and bool(
+        any(ckpt_dir.glob("*.safetensors"))
+        or (ckpt_dir / "audio_tokenizer" / "model.safetensors").is_file()
     )
 
 
@@ -216,9 +224,6 @@ def _bootstrap() -> None:
 _bootstrap()
 
 
-_TEMPLATE_BY_HAS_REFERENCE = {True: "ref_edit_tata", False: "tts_instruction"}
-
-
 def _build_job(request) -> tuple[dict[str, Any], Path | None]:
     has_reference = bool(request.reference_audio_bytes)
     job = {
@@ -235,7 +240,6 @@ def _build_job(request) -> tuple[dict[str, Any], Path | None]:
             tmp_file.write(request.reference_audio_bytes[0])
             ref_audio_path = Path(tmp_file.name)
         job["ref_audio_path"] = str(ref_audio_path)
-        job["ref_audio_bytes"] = request.reference_audio_bytes[0]
         job["ref_text"] = request.reference_text
     return job, ref_audio_path
 
@@ -249,7 +253,7 @@ def synthesize(request) -> bytes:
     from breeze_infer.templates import get_template, prepare_inputs
 
     has_reference = bool(request.reference_audio_bytes)
-    template_name = _TEMPLATE_BY_HAS_REFERENCE[has_reference]
+    template_name = "ref_edit_tata" if has_reference else "tts_instruction"
 
     ref_audio_path: Path | None = None
     try:

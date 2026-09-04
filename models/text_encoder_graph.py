@@ -79,9 +79,9 @@ class TextEncoderGraphCache:
             record = self._records.get(key)
             if record is None:
                 if self._frozen:
-                    raise RuntimeError(
-                        f"text encoder CUDA graph {key} was not declared in the warmup profile"
-                    )
+                    # Undeclared shape after warmup: run eager rather than
+                    # fail the job. Same padded math as a captured graph.
+                    return self._eager_forward(segments, lengths)
                 device = segments[0].device
                 static_ids = torch.zeros(
                     (batch_size, max_length), dtype=segments[0].dtype, device=device
@@ -143,6 +143,28 @@ class TextEncoderGraphCache:
                 record.output[row, :length] for row, length in enumerate(lengths)
             ]
             return hidden_states, []
+
+    def _eager_forward(
+        self, segments: Sequence[torch.Tensor], lengths: list[int]
+    ) -> tuple[list[torch.Tensor], list[Any]]:
+        """Padded eager pass for shapes the warmup profile did not declare."""
+        device = segments[0].device
+        max_length = self._bucket(max(lengths))
+        input_ids = torch.zeros(
+            (len(segments), max_length), dtype=segments[0].dtype, device=device
+        )
+        attention_mask = torch.zeros(
+            (len(segments), max_length), dtype=torch.long, device=device
+        )
+        position_ids = torch.zeros_like(attention_mask)
+        self._copy_inputs(segments, input_ids, attention_mask, position_ids)
+        output = self.text_encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            output_hidden_states=False,
+        ).last_hidden_state
+        return [output[row, :length] for row, length in enumerate(lengths)], []
 
     @property
     def graph_keys(self) -> tuple[tuple[int, int], ...]:
