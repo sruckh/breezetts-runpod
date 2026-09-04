@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/python-3.10%2B-FF6A3D?labelColor=0B0D0E" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/platform-runpod%20serverless-FF6A3D?labelColor=0B0D0E" alt="RunPod Serverless">
   <img src="https://img.shields.io/badge/audio-24kHz%20·%2016--bit%20·%20mono-FF6A3D?labelColor=0B0D0E" alt="24kHz 16-bit mono PCM WAV">
-  <img src="https://img.shields.io/badge/tests-56%20passing-FF6A3D?labelColor=0B0D0E" alt="56 tests passing">
+  <img src="https://img.shields.io/badge/tests-57%20passing-FF6A3D?labelColor=0B0D0E" alt="57 tests passing">
 </p>
 
 A [RunPod serverless](https://docs.runpod.io/serverless/overview) worker that wraps
@@ -178,15 +178,17 @@ never a stack trace or credential in the payload.
 | `AUDIO_DELIVERY` | `auto` | `auto` \| `s3` \| `base64` — deployment-level delivery default |
 | `B2_ACCESS_KEY_ID`, `B2_SECRET_ACCESS_KEY` | — | wrapped in a `Secret` container; never logged, never in a crash dump |
 | `B2_ENDPOINT_URL`, `B2_BUCKET` | — | Backblaze B2 target |
+| `B2_REGION` | from endpoint URL | S3 signing region; inferred from `s3.<region>.backblazeb2.com` when unset |
 | `B2_KEY_PREFIX` | `""` | prepended to every object key |
 | `B2_URL_EXPIRES_IN` | `86400` | presigned URL lifetime, seconds |
-| `BREEZE_FAST_ALL` | unset | enable `--fast-all` CUDA Graph warmup (~14.4 GiB VRAM vs ~7.7 GiB eager) |
+| `BREEZE_FAST_ALL` | unset | enable `--fast-all` CUDA Graph warmup (~14.4 GiB VRAM vs ~7.7 GiB eager); request shapes outside the warmup profile run eager instead of failing |
 | `RUNPOD_INIT_TIMEOUT` | `1200` | seconds RunPod allows for model download + warmup before marking the worker unhealthy |
 
 Object keys follow `{prefix}{YYYY}/{MM}/{DD}/{sanitized_job_id}-{uuid4}.wav`. The B2 client is
-built with `botocore.config.Config(request_checksum_calculation="when_required",
-response_checksum_validation="when_required")` — without it, B2 rejects uploads with
-`InvalidArgument: Unsupported header`.
+built with `botocore.config.Config(signature_version="s3v4",
+request_checksum_calculation="when_required",
+response_checksum_validation="when_required")` — without these, B2 rejects uploads
+(`InvalidArgument: Unsupported header`) or mis-signs presigned URLs.
 
 ## Testing
 
@@ -194,28 +196,34 @@ response_checksum_validation="when_required")` — without it, B2 rejects upload
 BREEZE_TEST_MOCK_ENGINE=1 python3 -m pytest tests/ -q
 ```
 
-56 tests, all CPU-only and network-free: the model never loads (`BREEZE_TEST_MOCK_ENGINE=1` swaps
+57 tests, all CPU-only and network-free: the model never loads (`BREEZE_TEST_MOCK_ENGINE=1` swaps
 in a silent-WAV stub at the same call boundary), and every S3 call is a stubbed or monkeypatched
 `boto3` client. Coverage includes golden payloads for all three modes, all 8 vocal cues, the
 4 MB / 6 MB boundary (accepted at the bound, rejected one byte over), reference audio temp-file
-creation and safe cleanup in the engine, the B2 checksum config and key template, the base64
+creation and safe cleanup in the engine, the checkpoint completeness guard (manifest AND
+weights), the B2 checksum config and key template, the base64
 fallback path, `--test_input` per mode, and every crash-dump path checked for leaked secrets or
 reference audio.
 
 ## Container
 
-Built on `pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel`, with `flash-attn==2.8.3` compiled for
-`sm90` (Hopper/H100, default) or `sm80` (A100, via `--build-arg FLASH_ATTN_CUDA_ARCHS=80`).
-`ENTRYPOINT []` stays empty so RunPod's command injection works, and the process runs unbuffered:
+Built on `nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04` (Python 3.12 in `/opt/venv`) with
+PyTorch 2.9.1 (cu128) and `flash-attn==2.8.3` installed as a prebuilt Dao-AILab binary wheel
+pinned to torch 2.9 / cu12 — nothing compiles at image build. `ENTRYPOINT []` stays empty so
+RunPod's command injection works, and the process runs unbuffered:
 
 ```dockerfile
 ENTRYPOINT []
 CMD ["python3", "-u", "handler.py"]
 ```
 
-The checkpoint is not baked into the image — it resolves at boot from the network volume
-(`/runpod-volume/breeze-tts-2`), falling back to an `hf_transfer` download and then plain
-`huggingface_hub` if that fails, all inside the `RUNPOD_INIT_TIMEOUT` budget.
+The checkpoint is not baked into the image — at boot `resolve_checkpoint()` checks, in order:
+an explicit `BREEZE_CHECKPOINT_DIR`/`MODEL_PATH` override, RunPod's model-cache layout
+(`/runpod-volume/huggingface-cache/hub`), `${HF_HOME}/hub`, the dedicated volume directory
+(`/runpod-volume/breeze-tts-2`), and the user hub cache. A directory counts as complete only
+with a manifest AND weights (`config.json` downloads first, so manifest-only can be a partial
+download); otherwise it downloads via `hf_transfer` with a plain `huggingface_hub` fallback,
+all inside the `RUNPOD_INIT_TIMEOUT` budget.
 
 ## Project layout
 
@@ -224,8 +232,11 @@ schema_validator.py   request validation, single-pass decode, size limits
 engine.py              module-scope model bootstrap + synthesis dispatch
 storage.py              B2 upload/presign, base64 fallback, Secret wrapping
 handler.py              runpod.serverless.start(...) + crash dumps
+breeze_infer/           vendored Breeze TTS 2 inference runtime (upstream parity)
+models/                 vendored model definitions + fast CUDA-graph streaming runtime
+configs/fast.json       warmup profile: the CUDA graph shapes --fast-all captures
 Dockerfile              CUDA build, package pins, launch contract
-tests/                  56 tests — see Testing above
+tests/                  57 tests — see Testing above
 .icm/                   the full spec this worker was built from, stage by stage
 ```
 
