@@ -135,9 +135,9 @@ class BackbonePrefillGraphCache:
             record = self._records.get(key)
             if record is None:
                 if self._frozen:
-                    raise RuntimeError(
-                        f"backbone prefill CUDA graph {key} was not declared in the warmup profile"
-                    )
+                    # Undeclared shape after warmup: eager pass into the same
+                    # static cache rather than fail the job.
+                    return self._eager_prefill(inputs_embeds, attention_mask, bucket_len)
                 static_embeds = torch.zeros(
                     (batch_size, bucket_len, hidden_size),
                     dtype=inputs_embeds.dtype,
@@ -227,6 +227,50 @@ class BackbonePrefillGraphCache:
                 attention_mask=record.attention_mask,
                 prefill_len=bucket_len,
             )
+
+    def _eager_prefill(
+        self,
+        inputs_embeds: torch.Tensor,
+        attention_mask: torch.Tensor,
+        bucket_len: int,
+    ) -> BackbonePrefillOutput:
+        """Padded eager pass for shapes the warmup profile did not declare.
+        Mirrors the captured path: same _forward into the shared static cache,
+        same finish_direct_prefill so the decode graph continues correctly."""
+        batch_size = int(inputs_embeds.shape[0])
+        hidden_size = int(inputs_embeds.shape[2])
+        device = inputs_embeds.device
+        static_embeds = torch.zeros(
+            (batch_size, bucket_len, hidden_size),
+            dtype=inputs_embeds.dtype,
+            device=device,
+        )
+        static_mask = torch.zeros(
+            (batch_size, bucket_len),
+            dtype=attention_mask.dtype,
+            device=device,
+        )
+        static_positions = torch.ones_like(static_mask, dtype=torch.long)
+        static_causal_mask = torch.empty(
+            (batch_size, 1, bucket_len, self.backbone_graph.max_seq_len),
+            dtype=inputs_embeds.dtype,
+            device=device,
+        )
+        cache_position = torch.arange(bucket_len, device=device, dtype=torch.long)
+        self._copy_inputs(
+            inputs_embeds, attention_mask, static_embeds, static_mask, static_positions
+        )
+        self._update_causal_mask(static_mask, static_causal_mask)
+        hidden_states, logits = self._forward(
+            static_embeds, static_causal_mask, static_positions, cache_position
+        )
+        self.backbone_graph.finish_direct_prefill(bucket_len)
+        return BackbonePrefillOutput(
+            hidden_states=hidden_states,
+            logits=logits,
+            attention_mask=static_mask,
+            prefill_len=bucket_len,
+        )
 
     @property
     def graph_keys(self) -> tuple[tuple[int, int], ...]:
